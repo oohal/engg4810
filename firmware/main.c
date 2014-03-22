@@ -76,6 +76,7 @@ int main(void)
 
 	// TODO: work out what's up with the clocking of the ADC, tivaware docs says only the TM4x129 devices can use the PLL as a clock source
 	//
+
 	ADCClockConfigSet(ADC0_BASE, ADC_CLOCK_SRC_PIOSC, 0);
 	ADCSequenceConfigure(ADC0_BASE, 3, ADC_TRIGGER_PROCESSOR, 0);
 	ADCSequenceStepConfigure(ADC0_BASE, 3, 0, ADC_CTL_END | ADC_CTL_CH11 | ADC_CTL_IE); // conversion from A11, trigger interrupt on completion
