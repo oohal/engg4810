@@ -1,6 +1,5 @@
-#define PART_TM4C123GH6PM
-
 #include <stdint.h>
+#include <string.h>
 #include <stdbool.h>
 
 #include <inc/hw_memmap.h>
@@ -66,3 +65,9 @@ void IntDefaultHandler(void)
 {
 	flash_leds(LED_RED, 300000);
 }
+
+void die_horribly(void) {
+	flash_leds(LED_BLUE, 0);
+
+}
+

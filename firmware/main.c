@@ -1,5 +1,3 @@
-#define PART_TM4C123GH6PM
-
 #include <stdint.h>
 #include <stdbool.h>
 
@@ -18,6 +16,10 @@
 #include <driverlib/uart.h>
 #include <driverlib/pin_map.h>
 
+#include "firmware.h"
+
+#include <string.h>
+
 /* 1Hz system tick interrupt */
 // FIXME: this isn't actually 1Hz right now
 
@@ -29,8 +31,6 @@ void SysTicker(void)
 	return;
 }
 
-/* */
-
 int main(void)
 {
 	uint8_t pins =  GPIO_PIN_1 | GPIO_PIN_2 | GPIO_PIN_3;
@@ -40,7 +40,7 @@ int main(void)
 
 	// configure systick to give an tick interrupt once per second
 	// NB: maximum systick period is 16,777,216 so don't set it too high.
-	SysTickPeriodSet(SysCtlClockGet()/1000);
+	SysTickPeriodSet(SysCtlClockGet()/2);
 	SysTickIntEnable();
 	SysTickEnable();
 
@@ -50,16 +50,8 @@ int main(void)
 
 	// SPI0 and I2C0 both use the port A pins, so enable that first
 	SysCtlPeripheralEnable(SYSCTL_PERIPH_GPIOA);
-
-	/* configure SPI0 */
 	SysCtlPeripheralEnable(SYSCTL_PERIPH_SSI0);
 	SysCtlPeripheralEnable(SYSCTL_PERIPH_I2C1);
-
-	GPIOPinConfigure(GPIO_PA2_SSI0CLK);
-	GPIOPinConfigure(GPIO_PA3_SSI0FSS);
-	GPIOPinConfigure(GPIO_PA4_SSI0RX);
-	GPIOPinConfigure(GPIO_PA5_SSI0TX);
-	GPIOPinTypeSSI(GPIO_PORTA_BASE, GPIO_PIN_5 | GPIO_PIN_4 | GPIO_PIN_3 | GPIO_PIN_2);
 
 	/* configure I2C1 pins for accelerometer and whatever else */
 	GPIOPinConfigure(GPIO_PA6_I2C1SCL);
@@ -77,27 +69,25 @@ int main(void)
 	// TODO: work out what's up with the clocking of the ADC, tivaware docs says only the TM4x129 devices can use the PLL as a clock source
 	//
 	//ADCClockConfigSet(ADC0_BASE, ADC_CLOCK_SRC_PIOSC, 0);
+
+
+	// Accelerometer Outputs
+	ADCSequenceConfigure(ADC0_BASE, 0, ADC_TRIGGER_PROCESSOR, 0);
+	ADCSequenceStepConfigure(ACD0_BASE, 0, 0, ADC_CTL_CH1);
+	ADCSequenceStepConfigure(ACD0_BASE, 0, 1, ADC_CTL_CH2);
+	ADCSequenceStepConfigure(ACD0_BASE, 0, 2, ADC_CTL_CH4 | ADC_CTL_END);
+	ADCSequenceEnable(ACD0_BASE, 0);
+
+
+	// Temp sensor output
 	ADCSequenceConfigure(ADC0_BASE, 3, ADC_TRIGGER_PROCESSOR, 0);
-	ADCSequenceStepConfigure(ADC0_BASE, 3, 0, ADC_CTL_END | ADC_CTL_CH11); // conversion from A11, trigger interrupt on completion
+	ADCSequenceStepConfigure(ADC0_BASE, 3, 0, ADC_CTL_END | ADC_CTL_TS); // conversion from A11, trigger interrupt on completion
 	ADCSequenceEnable(ADC0_BASE, 3);
 
-
-	// Let get UARTed
-
-	// UART0 is the debug port interface
-	// TODO: this stuff needs to be debug build only
-
-	SysCtlPeripheralEnable(SYSCTL_PERIPH_UART0); // 115200
-	GPIOPinTypeUART(GPIO_PORTA_BASE, GPIO_PIN_0 | GPIO_PIN_1);
-	GPIOPinConfigure(GPIO_PA0_U0RX);
-	GPIOPinConfigure(GPIO_PA1_U0TX);
-
-	UARTConfigSetExpClk(UART0_BASE, SysCtlClockGet(), 115200, UART_CONFIG_WLEN_8 | UART_CONFIG_STOP_ONE | UART_CONFIG_PAR_NONE);
-	UARTFIFOEnable(UART0_BASE);
-	UARTEnable(UART0_BASE);
+	// initalise UART0 which runs the debug interface. This gets NOPed out for release builds
+	debug_init();
 
 	// UART1 is the GPS serial interface
-
 	SysCtlPeripheralEnable(SYSCTL_PERIPH_UART1);
 	GPIOPinTypeUART(GPIO_PORTB_BASE, GPIO_PIN_0 | GPIO_PIN_1);
 	GPIOPinConfigure(GPIO_PB0_U1RX);
@@ -107,25 +97,26 @@ int main(void)
 	UARTFIFOEnable(UART1_BASE);
 	UARTEnable(UART1_BASE);
 
+	//sd_init();
+
 	uint32_t i = 0, sample = 0;
-	char str[] = "test\r\n";
+
+	debug_printf("asdfasdfsdfdsa\r\n");
 
 	while(1) {
 		const uint32_t max = 0x3FF;
 
 		if(ticked) {
-			int j;
-
-			for(j = 0; j < sizeof(str); j++) {
-				UARTCharPutNonBlocking(UART0_BASE, str[j]);
-			}
-
 			ticked = 0;
 			sample = 0;
 			ADCProcessorTrigger(ADC0_BASE, 3);
 			while(ADCBusy(ADC0_BASE)) {};
 			ADCSequenceDataGet(ADC0_BASE, 3, &sample);
 			ADCIntClear(ADC0_BASE, 3);
+
+			float temp = 147.5f - ((75.0f * 3.3f) * sample / 4096);
+
+			debug_printf("internal temp: %f (%d)\r\n", temp, sample);
 		}
 
 		if(i > max) {
