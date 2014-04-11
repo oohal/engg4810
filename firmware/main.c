@@ -87,14 +87,14 @@ int main(void)
 
 	adc_init();
 
-	//sd_init();
-
 	uint32_t i = 0, sample = 0;
 	debug_printf("asdfasdfsdfdsa\r\n");
 
 	for(i = 0; i < 7; i++) {
 		sample_buffer[i] = 0;
 	}
+
+	sd_init();
 
 	int conversion = 0;
 

@@ -1,5 +1,6 @@
 #include <stdint.h>
 #include <stdbool.h>
+#include <string.h>
 
 #include <inc/hw_memmap.h>
 #include <inc/hw_types.h>
@@ -45,12 +46,36 @@ static void sd_setcs(int i) // sets the state of the CS pin
 	}
 }
 
-static void sd_send_raw(const char *msg, int len)
-{
-	int i;
+/* Sends and recieves a message over the SPI bus
+ *
+ * tx    - pointer to txlen characters to transmit
+ * txlen - number of characters to transmit from txbuf
+ *
+ * rx - pointer to a buffer that is atleast rxlen long
+ * offset - the first offset characters that are recieved will not be written into rx
+ */
 
-	for(i = 0; i < len; i++) {
-		SSIDataPutNonBlocking(SSI_SD, msg[i]);
+static void spi_exchange(char *tx, int txlen, char *rx, int rxlen, int skip)
+{
+	int i = 0, rxed = 0;
+
+	for(i = 0; i < rxlen + skip; i++) {
+		uint8_t c;
+		uint32_t recv;
+
+		/* if we've sent the whole tx buffer, pad it out with 0xFF */
+		if(i < txlen) {
+			c = tx[i];
+		} else {
+			c = 0xFF;
+		}
+
+		SSIDataPutNonBlocking(SSI_SD, c);
+		SSIDataGet(SSI_SD, &recv);
+
+		if(i > skip) {
+			rx[rxed++] = recv;
+		}
 	}
 }
 
@@ -65,7 +90,7 @@ void sd_init(void)
 		8
 	);
 
-	SSIIntRegister(SSI_SD, ssi_interrupt);
+	//SSIIntRegister(SSI_SD, ssi_interrupt);
 	//SSIIntEnable(SSI_SD, SSI_RXTO); // enable recieve timeout interrupt
 	SSIEnable(SSI_SD);
 
@@ -98,43 +123,22 @@ void sd_init(void)
 	// after power up the SD card needs atleast 74 clock cycles to clear internal state
 	// so feed it these before trying to communicate
 
-	for(i = 0; i < 10; i++) {
-		SSIDataPut(SSI_SD, '\xFF');
-	}
+	char idle_msg[] = "\xFF\xFF\xFF\xFF\xFF\xFF\xFF\xFF\xFF\xFF\xFF\xFF";
 
-	while(SSIBusy(SSI_SD)) {};
+	spi_exchange(idle_msg, sizeof(idle_msg), NULL, 0, sizeof(idle_msg));
 
-	// Assert /CS and send CMD0
+	sd_setcs(0); // Assert /CS and send CMD0
 
-	sd_setcs(0);
-
+	char response[10];
 	char msg[] = "\xFF\x40\x00\x00\x00\x00\x95"; // SD reset command \w CRC
-	sd_send_raw(msg, sizeof(msg));
-
-	while(1) {
-		uint32_t rx;
-
-		SSIDataGetNonBlocking(SSI0_BASE, &rx);
-
-		if(rx != 0xFF) {
-			break;
-		}
-	}
+	spi_exchange(msg, sizeof(msg), response, sizeof(response), sizeof(msg));
 
 	sd_setcs(1); // clock
-}
 
-#if 0
-void sd_process(void)
-{
-	char rx_buf[6], tx_buf[6];
-	int i;
-
-	if(sd_available) {
-		for(i = 0; i < 6; i++) {
-
-		}
+	debug_printf("rxed:");
+	for(i = 0; i < sizeof(response); i++) {
+		debug_printf(" %x", (uint32_t) response[i]);
 	}
-	}
+
+	debug_printf("\r\n");
 }
-#endif
