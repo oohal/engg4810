@@ -13,7 +13,7 @@
 
 extern tDMAControlTable dma_channel_list[64];
 
-void die_horribly();
+void die_horribly(void);
 
 // SD card interfacing, etc
 

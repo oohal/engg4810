@@ -48,10 +48,7 @@ int main(void)
 	// configure LED GPIOs for mad rad blinkenlites
 	SysCtlPeripheralEnable(SYSCTL_PERIPH_GPIOF);
 	GPIOPinTypeGPIOOutput(GPIO_PORTF_BASE, pins);
-
-	// SPI0 and I2C0 both use the port A pins, so enable that first
 	SysCtlPeripheralEnable(SYSCTL_PERIPH_GPIOA);
-	SysCtlPeripheralEnable(SYSCTL_PERIPH_SSI0);
 
 	// setup DMA, for specific details of how it's used check the relevant source file for that peripherial.
 	SysCtlPeripheralEnable(SYSCTL_PERIPH_UDMA);
@@ -67,8 +64,6 @@ int main(void)
 	GPIOPinTypeI2C(GPIO_PORTA_BASE, GPIO_PIN_7);
 */
 
-	// ADC0_BASE
-
 	// initalise UART0 which runs the debug interface. This gets NOPed out for release builds
 	debug_init();
 
@@ -83,8 +78,9 @@ int main(void)
 	UARTFIFOEnable(UART1_BASE);
 	UARTEnable(UART1_BASE);
 
-	GPIOPinWrite(GPIO_PORTF_BASE, pins, 0x00);
+	GPIOPinWrite(GPIO_PORTF_BASE, pins, 0x00); // turn off LEDs
 
+	sd_init();
 	adc_init();
 
 	uint32_t i = 0, sample = 0;
@@ -93,8 +89,6 @@ int main(void)
 	for(i = 0; i < 7; i++) {
 		sample_buffer[i] = 0;
 	}
-
-	sd_init();
 
 	int conversion = 0;
 
@@ -122,27 +116,11 @@ int main(void)
 			conversion++;
 		}
 
-	/*
-		ticked = 0;
-		sample = 0;
 
-		ADCProcessorTrigger(ADC0_BASE, 3);
-		while(ADCBusy(ADC0_BASE)) {};
-		ADCSequenceDataGet(ADC0_BASE, 3, &sample);
-		ADCIntClear(ADC0_BASE, 3);
-		float temp = 147.5f - ((75.0f * 3.3f) * sample / 4096);
-
-		debug_printf("internal temp: %f (%d)\r\n", temp, sample);
-
-		if(i > max) {
-			GPIOPinWrite(GPIO_PORTF_BASE, pins, pins);
-			i = 0;
-		} else if(i > sample) {
-			GPIOPinWrite(GPIO_PORTF_BASE, pins, 0x00);
-		}
-
-		i++;
-*/
+		/*
+		 float temp = 147.5f - ((75.0f * 3.3f) * sample / 4096);
+		 debug_printf("internal temp: %f (%d)\r\n", temp, sample);
+		 */
 	}
 
 	return 0;
