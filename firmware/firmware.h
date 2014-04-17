@@ -17,7 +17,11 @@ void die_horribly(void);
 
 // SD card interfacing, etc
 
-void sd_init(void);
+int sd_init(void);
+
+int sd_write_block(int index, const char *block);
+int sd_read_block(int i, char *into);
+uint8_t sd_cmd(int cmd_index, int arg, char *response, int rxlen);
 
 // debugging routines, these get NOPed out for non-debug builds
 

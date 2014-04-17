@@ -18,6 +18,8 @@
 
 #include "firmware.h"
 
+#include "fatfs/ff.h"
+
 tDMAControlTable dma_channel_list[64];
 #pragma DATA_ALIGN(dma_channel_list, 1024)
 
@@ -28,15 +30,55 @@ volatile int ticked = 1;
 
 void SysTicker(void)
 {
-	ticked = 1;
+	ticked++;
 	return;
 }
 
+// The magnitude of the acceleration vector is sqrt(x^2 + y^2 + z^2), but
+// we don't care about the actual magnitude, just wether it's bigger or
+// smaller than
+// calculating this for comparison we can skip
+// the sqrt.
+
+float get_sqmag(uint16_t *samples)
+{
+	// at 0g the outputs 2.5V when in free fall,
+	const int FF_OFFSET = 2844;
+	int i, mag = 0;
+
+	for(i = 0; i < 3; i++) {
+		int corrected = samples[i] - FF_OFFSET;
+		mag += corrected * corrected;
+	}
+
+	return mag;
+}
+
+// returns the index
+int accel_analyze(uint16_t *samples, int sample_count)
+{
+	int i, mag = 0, max_mag, max_index = 0;
+
+	for(i = 0; i < sample_count; i++) {
+		mag = get_sqmag(samples);
+
+		if(mag > max_mag) {
+			max_index = i;
+		}
+
+		samples += 4;
+	}
+
+	return max_index;
+}
+
+#define SAMPLES (sizeof(sample_buffer) / sizeof(*sample_buffer))
+
+#pragma FUNC_NEVER_RETURNS(main);
 int main(void)
 {
-	uint8_t pins =  GPIO_PIN_1 | GPIO_PIN_2 | GPIO_PIN_3;
+	uint8_t pins = GPIO_PIN_1 | GPIO_PIN_2 | GPIO_PIN_3;
 
-	// gotta go slow, 4MHz ought to be enough for anyone
 	SysCtlClockSet(SYSCTL_OSC_MAIN | SYSCTL_XTAL_16MHZ);
 
 	// configure systick to give an tick interrupt once per second
@@ -55,15 +97,6 @@ int main(void)
 	uDMAControlBaseSet(dma_channel_list);
 	uDMAEnable();
 
-	/* configure I2C1 pins for accelerometer and whatever else */
-/*
-	SysCtlPeripheralEnable(SYSCTL_PERIPH_I2C1);
-	GPIOPinConfigure(GPIO_PA6_I2C1SCL);
-	GPIOPinConfigure(GPIO_PA7_I2C1SDA);
-	GPIOPinTypeI2CSCL(GPIO_PORTA_BASE, GPIO_PIN_6);
-	GPIOPinTypeI2C(GPIO_PORTA_BASE, GPIO_PIN_7);
-*/
-
 	// initalise UART0 which runs the debug interface. This gets NOPed out for release builds
 	debug_init();
 
@@ -80,48 +113,69 @@ int main(void)
 
 	GPIOPinWrite(GPIO_PORTF_BASE, pins, 0x00); // turn off LEDs
 
-	sd_init();
 	adc_init();
 
-	uint32_t i = 0, sample = 0;
-	debug_printf("asdfasdfsdfdsa\r\n");
+	debug_printf("-- started --\r\n");
 
-	for(i = 0; i < 7; i++) {
-		sample_buffer[i] = 0;
+	/*
+	 * Attempt to mount the SD card and read/write to files
+	 */
+
+	FATFS fs;
+	FRESULT res;
+
+	res = f_mount(&fs, "/", 1);
+
+	if(res == FR_OK) {
+		DIR dir;
+
+		res = f_opendir(&dir, "/");
+
+		if(res == FR_OK) {
+			FILINFO info;
+
+			do {
+				res = f_readdir(&dir, &info);
+				if(res != FR_OK) {
+					debug_printf("err reading dir\r\n");
+					break;
+				}
+
+				if(!info.fname[0]) break;
+
+				debug_printf(" %s\r\n", info.fname);
+			} while(1);
+
+			f_closedir(&dir);
+		} else {
+			debug_printf("failed to open dir\r\n");
+		}
+
+		FIL fp;
+
+		f_open(&fp, "/asdf.txt", FA_CREATE_ALWAYS | FA_WRITE);
+			char msg[] = "PLEASEWORKPLZ\n";
+			uint32_t written;
+			f_write(&fp, msg, sizeof(msg) - 1, &written);
+			f_sync(&fp);
+		f_close(&fp);
 	}
 
-	int conversion = 0;
-
 	while(1) {
-		const uint32_t max = 0x3FF;
-
-		if(ticked) {
+		if(ticked > 2) {
 			ticked = 0;
 
 			if(udma_done) {
-				debug_printf("%d - (%d, %d, %d)  - %d | (%d, %d, %d) - %d\r\n", conversion,
-					(int) sample_buffer[0], (int) sample_buffer[1], (int) sample_buffer[2], (int) sample_buffer[3],
-					(int) sample_buffer[4], (int) sample_buffer[5], (int) sample_buffer[6], (int) sample_buffer[7]
-				);
-
+	  			udma_done = 0;
 				adc_reinit();
 
-				conversion = 0;
-	  			udma_done  = 0;
+				int index = accel_analyze(sample_buffer, 4);
+				uint16_t *buf = sample_buffer + index * 4;
 
-				sample++;
+				debug_printf("peak: (%d, %d, %d)\r\n", buf[0], buf[1], buf[2], buf[3]);
 			}
 
 			ADCProcessorTrigger(ADC0_BASE, 0);
-			conversion++;
 		}
-
-
-		/*
-		 float temp = 147.5f - ((75.0f * 3.3f) * sample / 4096);
-		 debug_printf("internal temp: %f (%d)\r\n", temp, sample);
-		 */
 	}
-
-	return 0;
 }

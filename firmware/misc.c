@@ -50,24 +50,19 @@ static flash_leds(uint8_t colour, int flash)
 }
 
 // Fault glows red and makes you dead
-void FaultISR(void)
-{
+void FaultISR(void) {
 	flash_leds(LED_RED, 0);
 }
 
 // NMI? OHGODWHY - green
-void NmiISR(void)
-{
+void NmiISR(void) {
 	flash_leds(LED_GREEN, 0);
 }
 
-void IntDefaultHandler(void)
-{
+void IntDefaultHandler(void) {
 	flash_leds(LED_RED, 300000);
 }
 
 void die_horribly(void) {
 	flash_leds(LED_BLUE, 0);
-
 }
-
