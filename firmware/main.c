@@ -1,5 +1,6 @@
 #include <stdint.h>
 #include <stdbool.h>
+#include <string.h>
 
 #include <inc/hw_memmap.h>
 #include <inc/hw_types.h>
@@ -15,6 +16,7 @@
 #include <driverlib/udma.h>
 #include <driverlib/uart.h>
 #include <driverlib/pin_map.h>
+#include <driverlib/timer.h>
 
 #include "firmware.h"
 
@@ -35,18 +37,18 @@ void SysTicker(void)
 }
 
 // The magnitude of the acceleration vector is sqrt(x^2 + y^2 + z^2), but
-// we don't care about the actual magnitude, just wether it's bigger or
-// smaller than
-// calculating this for comparison we can skip
-// the sqrt.
+// we don't care about the actual magnitude, just relative size. As a result
+// doing the sqrt is unnecessary
 
-float get_sqmag(uint16_t *samples)
+static int get_sqmag(uint16_t *samples)
 {
-	// at 0g the outputs 2.5V when in free fall,
-	const int FF_OFFSET = 2844;
+	// at 0g the outputs 2.5V when in free fall - FIXME: CHECK THIS, PRETTY SURE IT'S WRONG
+	//const int FF_OFFSET = 2844;
+	const int FF_OFFSET = 0;
+
 	int i, mag = 0;
 
-	for(i = 0; i < 3; i++) {
+	for(i = 0; i <= 2; i++) {
 		int corrected = samples[i] - FF_OFFSET;
 		mag += corrected * corrected;
 	}
@@ -54,42 +56,47 @@ float get_sqmag(uint16_t *samples)
 	return mag;
 }
 
-// returns the index
-int accel_analyze(uint16_t *samples, int sample_count)
+uint16_t *accel_analyze(uint16_t *samples)
 {
-	int i, mag = 0, max_mag, max_index = 0;
+	uint16_t *largest = samples;
+	int mag = 0, max_mag = 0;
+	int i;
 
-	for(i = 0; i < sample_count; i++) {
+	for(i = 0; i < SAMPLE_RATE; i++) {
 		mag = get_sqmag(samples);
 
 		if(mag > max_mag) {
-			max_index = i;
+			max_mag = mag;
+			largest = samples;
 		}
 
 		samples += 4;
 	}
 
-	return max_index;
+	return largest;
 }
-
-#define SAMPLES (sizeof(sample_buffer) / sizeof(*sample_buffer))
 
 #pragma FUNC_NEVER_RETURNS(main);
 int main(void)
 {
 	uint8_t pins = GPIO_PIN_1 | GPIO_PIN_2 | GPIO_PIN_3;
+	SysCtlClockSet(SYSCTL_OSC_MAIN | SYSCTL_USE_PLL | SYSCTL_SYSDIV_1 | SYSCTL_XTAL_16MHZ);
 
-	SysCtlClockSet(SYSCTL_OSC_MAIN | SYSCTL_XTAL_16MHZ);
+	SysCtlPeripheralEnable(SYSCTL_PERIPH_ADC0); // silicon bug workaround, the adc just flat out won't work off MOSC if it's used as the system clock
+	ADCClockConfigSet(ADC0_BASE, ADC_CLOCK_SRC_PIOSC, 1);
+
+	SysCtlClockSet(SYSCTL_OSC_MAIN | SYSCTL_USE_OSC | SYSCTL_SYSDIV_1 | SYSCTL_XTAL_16MHZ);
 
 	// configure systick to give an tick interrupt once per second
 	// NB: maximum systick period is 16,777,216 so don't set it too high.
-	SysTickPeriodSet(SysCtlClockGet()/2);
+	SysTickPeriodSet(SysCtlClockGet());
 	SysTickIntEnable();
 	SysTickEnable();
 
 	// configure LED GPIOs for mad rad blinkenlites
 	SysCtlPeripheralEnable(SYSCTL_PERIPH_GPIOF);
 	GPIOPinTypeGPIOOutput(GPIO_PORTF_BASE, pins);
+
 	SysCtlPeripheralEnable(SYSCTL_PERIPH_GPIOA);
 
 	// setup DMA, for specific details of how it's used check the relevant source file for that peripherial.
@@ -100,20 +107,11 @@ int main(void)
 	// initalise UART0 which runs the debug interface. This gets NOPed out for release builds
 	debug_init();
 
-	// UART1 is the GPS serial interface
-	SysCtlPeripheralEnable(SYSCTL_PERIPH_UART1);
-	SysCtlPeripheralEnable(SYSCTL_PERIPH_GPIOB);
-	GPIOPinTypeUART(GPIO_PORTB_BASE, GPIO_PIN_0 | GPIO_PIN_1);
-	GPIOPinConfigure(GPIO_PB0_U1RX);
-	GPIOPinConfigure(GPIO_PB1_U1TX);
-
-	UARTConfigSetExpClk(UART1_BASE, SysCtlClockGet(), 115200, UART_CONFIG_WLEN_8 | UART_CONFIG_STOP_ONE | UART_CONFIG_PAR_NONE);
-	UARTFIFOEnable(UART1_BASE);
-	UARTEnable(UART1_BASE);
-
-	GPIOPinWrite(GPIO_PORTF_BASE, pins, 0x00); // turn off LEDs
 
 	adc_init();
+	//gps_init(); // init uart2 and all the GPS bullshit
+
+	GPIOPinWrite(GPIO_PORTF_BASE, pins, 0x00); // turn off LEDs
 
 	debug_printf("-- started --\r\n");
 
@@ -121,6 +119,7 @@ int main(void)
 	 * Attempt to mount the SD card and read/write to files
 	 */
 
+#if 0
 	FATFS fs;
 	FRESULT res;
 
@@ -160,22 +159,24 @@ int main(void)
 			f_sync(&fp);
 		f_close(&fp);
 	}
+#endif
+
+
+	memset(sample_buffer, 0, sizeof(sample_buffer));
+
+	adc_start();
 
 	while(1) {
-		if(ticked > 2) {
+		if(udma_done) {
+			uint16_t *buf = accel_analyze(sample_buffer);
+
+			adc_start();
+
+			debug_printf("%d - peak: (%d, %d, %d) temp: %d \r\n", ticked,  (uint32_t) buf[0], (uint32_t) buf[1], (uint32_t)buf[2], (uint32_t)buf[3]);
+
+			//gps_update();
+
 			ticked = 0;
-
-			if(udma_done) {
-	  			udma_done = 0;
-				adc_reinit();
-
-				int index = accel_analyze(sample_buffer, 4);
-				uint16_t *buf = sample_buffer + index * 4;
-
-				debug_printf("peak: (%d, %d, %d)\r\n", buf[0], buf[1], buf[2], buf[3]);
-			}
-
-			ADCProcessorTrigger(ADC0_BASE, 0);
 		}
 	}
 }

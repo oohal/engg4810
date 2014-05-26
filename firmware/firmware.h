@@ -29,12 +29,19 @@ void debug_init(void);
 void debug_clear(void);
 void debug_printf(const char *fmt, ...);
 
-// ADC handlers
+// ADC stuff
+
+#define SAMPLE_RATE 256
 
 extern volatile int udma_done;
-extern uint16_t sample_buffer[16];
+extern uint16_t sample_buffer[4 * SAMPLE_RATE];
 
 void adc_init(void);
-void adc_reinit(void);
+void adc_start(void);
+
+// gps handling functions
+
+void gps_init(void);
+void gps_update(void);
 
 #endif /* FIRMWARE_H_ */
