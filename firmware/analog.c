@@ -27,14 +27,13 @@
 volatile int udma_done = 0;
 uint16_t sample_buffer[4 * SAMPLE_RATE]; // 4 values per sample instant
 
-/*
- * FIXME: I think this is only ever called for DMA errors, actual transfer completion notifications go on the relevant peripherial
- *        interrupt vector. So I should probably rejigger this sometime.
- */
+
+int dma_err = 0;
 void dma_int_handler(void)
 {
 	uDMAIntClear(UDMA_CHANNEL_ADC0);
 	udma_done = 1;
+	dma_err = 1;
 }
 
 void adc_int_handler(void)
@@ -55,6 +54,30 @@ void timer_int_handler(void)
 {
 	TimerIntClear(TIMER0_BASE, TIMER_TIMA_TIMEOUT);
 }
+
+
+/*
+ * peripherial scatter gather structure, we need this to support high-ish sampling rates since the DMA
+ * controller can only transfer 1024 items per transfer. So, we need to chain them up otherwise processor
+ * intervention is required.
+ */
+
+#define DMA_TASKS (SAMPLE_RATE * 4 / 1024)
+
+tDMAControlTable adc_dma_task_list[] = {
+	uDMATaskStructEntry(
+		1024, UDMA_SIZE_16,
+		UDMA_SRC_INC_NONE, (void *) (ADC0_BASE + ADC_O_SSFIFO0),
+		UDMA_DST_INC_16, sample_buffer,
+		UDMA_ARB_4, UDMA_MODE_PER_SCATTER_GATHER
+	),
+	uDMATaskStructEntry(
+		1024, UDMA_SIZE_16,
+		UDMA_SRC_INC_NONE, (void *) (ADC0_BASE + ADC_O_SSFIFO0),
+		UDMA_DST_INC_16, sample_buffer +  1024,
+		UDMA_ARB_4, UDMA_MODE_BASIC
+	)
+};
 
 void adc_init()
 {
@@ -96,6 +119,7 @@ void adc_init()
 	uDMAChannelAttributeEnable(UDMA_CHANNEL_ADC0, UDMA_ATTR_USEBURST | UDMA_ATTR_HIGH_PRIORITY);
 	uDMAChannelAssign(UDMA_CH14_ADC0_0);
 
+	/*
 	//uDMAChannelAttributeEnable(UDMA_CHANNEL_ADC0, UDMA_ATTR_USEBURST);
 	uDMAChannelControlSet(UDMA_CHANNEL_ADC0,
 		UDMA_PRI_SELECT |
@@ -103,6 +127,13 @@ void adc_init()
 		UDMA_DST_INC_16 |
 		UDMA_SRC_INC_NONE |
 		UDMA_ARB_4
+	);
+*/
+
+	uDMAChannelScatterGatherSet(UDMA_CHANNEL_ADC0,
+		sizeof(adc_dma_task_list) / sizeof(adc_dma_task_list[0]),
+		adc_dma_task_list,
+		true // we want the ADC DMA requests to drive the thing
 	);
 
 	ADCIntRegister(ADC0_BASE, 0, adc_int_handler);
@@ -128,6 +159,8 @@ void adc_init()
 }
 
 /*
+ * From the Tiva 123C errata sheet:
+ *
  * ADC#08 ADC Sample Sequencer Only Samples When Using Certain Clock Configurations
  * Revision(s) Affected: 6 and 7.
  *
@@ -141,21 +174,26 @@ void adc_init()
  *   clock source, then subsequently disable the PLL using HWREG(0x400fe060) !=
  *   0x00000200.
  *
- *
+ * laffo
  *
  */
-
 
 void adc_start(void)
 {
 	udma_done = 0;
-
+/*
 	// prepare new transfer
 	uDMAChannelTransferSet(UDMA_CHANNEL_ADC0 | UDMA_PRI_SELECT,
 		UDMA_MODE_BASIC,
 		(void *) (ADC0_BASE + ADC_O_SSFIFO0),
 		sample_buffer,
 		SAMPLE_RATE * 4
+	);
+*/
+	uDMAChannelScatterGatherSet(UDMA_CHANNEL_ADC0,
+		sizeof(adc_dma_task_list) / sizeof(adc_dma_task_list[0]),
+		adc_dma_task_list,
+		true // we want the ADC DMA requests to drive the thing
 	);
 
 	/* flush out ADC FIFO */

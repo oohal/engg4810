@@ -31,7 +31,10 @@ void debug_printf(const char *fmt, ...);
 
 // ADC stuff
 
-#define SAMPLE_RATE 256
+// NOTE: if you change the sampling rate the DMA task list stuff in analog.c also
+//       needs to be changed to match the new buffer size
+
+#define SAMPLE_RATE 512
 
 extern volatile int udma_done;
 extern uint16_t sample_buffer[4 * SAMPLE_RATE];
@@ -41,7 +44,9 @@ void adc_start(void);
 
 // gps handling functions
 
+extern volatile int gps_msg_ready;
+
 void gps_init(void);
-void gps_update(void);
+void gps_update(float *lat, float *lng, uint32_t *time, uint32_t *date);
 
 #endif /* FIRMWARE_H_ */

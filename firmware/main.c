@@ -17,6 +17,7 @@
 #include <driverlib/uart.h>
 #include <driverlib/pin_map.h>
 #include <driverlib/timer.h>
+#include <driverlib/fpu.h>
 
 #include "firmware.h"
 
@@ -56,9 +57,8 @@ static int get_sqmag(uint16_t *samples)
 	return mag;
 }
 
-uint16_t *accel_analyze(uint16_t *samples)
+int accel_analyze(uint16_t *samples, uint16_t **largest)
 {
-	uint16_t *largest = samples;
 	int mag = 0, max_mag = 0;
 	int i;
 
@@ -67,13 +67,13 @@ uint16_t *accel_analyze(uint16_t *samples)
 
 		if(mag > max_mag) {
 			max_mag = mag;
-			largest = samples;
+			*largest = samples;
 		}
 
 		samples += 4;
 	}
 
-	return largest;
+	return max_mag;
 }
 
 #pragma FUNC_NEVER_RETURNS(main);
@@ -82,16 +82,19 @@ int main(void)
 	uint8_t pins = GPIO_PIN_1 | GPIO_PIN_2 | GPIO_PIN_3;
 	SysCtlClockSet(SYSCTL_OSC_MAIN | SYSCTL_USE_PLL | SYSCTL_SYSDIV_1 | SYSCTL_XTAL_16MHZ);
 
-	SysCtlPeripheralEnable(SYSCTL_PERIPH_ADC0); // silicon bug workaround, the adc just flat out won't work off MOSC if it's used as the system clock
+	SysCtlPeripheralEnable(SYSCTL_PERIPH_ADC0);
 	ADCClockConfigSet(ADC0_BASE, ADC_CLOCK_SRC_PIOSC, 1);
 
 	SysCtlClockSet(SYSCTL_OSC_MAIN | SYSCTL_USE_OSC | SYSCTL_SYSDIV_1 | SYSCTL_XTAL_16MHZ);
 
 	// configure systick to give an tick interrupt once per second
 	// NB: maximum systick period is 16,777,216 so don't set it too high.
-	SysTickPeriodSet(SysCtlClockGet());
+	SysTickPeriodSet(SysCtlClockGet() / 100000);
 	SysTickIntEnable();
 	SysTickEnable();
+
+	FPUEnable();
+	FPUStackingDisable();
 
 	// configure LED GPIOs for mad rad blinkenlites
 	SysCtlPeripheralEnable(SYSCTL_PERIPH_GPIOF);
@@ -109,7 +112,7 @@ int main(void)
 
 
 	adc_init();
-	//gps_init(); // init uart2 and all the GPS bullshit
+	gps_init(); //
 
 	GPIOPinWrite(GPIO_PORTF_BASE, pins, 0x00); // turn off LEDs
 
@@ -166,17 +169,65 @@ int main(void)
 
 	adc_start();
 
+	uint16_t temp_sample, accel_sample[3];
+	uint32_t time, date;
+	float lat, lng;
+	int peak_accel = 0;
+
+	uint32_t gps_timer = 0, adc_timer = 0;
+
 	while(1) {
+		extern int dma_err;
+
+		if(dma_err) {
+			dma_err = 0;
+			debug_printf("dma_error\r\n");
+		}
+
+		if(gps_msg_ready) {
+			uint32_t start = ticked;
+
+			gps_update(&lat, &lng, &time, &date);
+
+			gps_timer = ticked - start;
+			if(!gps_timer) gps_timer = 1;
+		}
+
 		if(udma_done) {
-			uint16_t *buf = accel_analyze(sample_buffer);
+			uint32_t start = ticked;
+			uint16_t *buf;
+
+			int max = accel_analyze(sample_buffer, &buf);
+
+			if(max > peak_accel) {
+				peak_accel = max;
+				accel_sample[0] = buf[0];
+				accel_sample[1] = buf[1];
+				accel_sample[2] = buf[2];
+				//memcpy(accel_sample, buf, sizeof(accel_sample));
+				temp_sample = buf[4];
+			}
 
 			adc_start();
 
-			debug_printf("%d - peak: (%d, %d, %d) temp: %d \r\n", ticked,  (uint32_t) buf[0], (uint32_t) buf[1], (uint32_t)buf[2], (uint32_t)buf[3]);
+			adc_timer = ticked - start;
+			if(!adc_timer) adc_timer = 1;
+		}
 
-			//gps_update();
+		if(adc_timer && gps_timer) { // do 1Hz updates
+			debug_printf("timers: adc %d gps %d - ", adc_timer, gps_timer);
+
+			// end of sampling period, clear everything out and get new values
+			peak_accel = 0;
+
+			debug_printf("time: %u-%u ", date, time);
+			debug_printf("accel: (%d,%d,%d) ", (int) accel_sample[0], (int) accel_sample[1], (int) accel_sample[2]);
+			debug_printf("temp: %d ", (int) temp_sample);
+			debug_printf("loc: (%f,%f)\r\n", lat, lng);
 
 			ticked = 0;
+			adc_timer = 0;
+			gps_timer = 0;
 		}
 	}
 }

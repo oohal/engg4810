@@ -51,7 +51,10 @@ static flash_leds(uint8_t colour, int flash)
 
 // Fault glows red and makes you dead
 void FaultISR(void) {
-	flash_leds(LED_RED, 0);
+	//flash_leds(LED_RED, 0);
+	int i = 1;
+	GPIOPinWrite(GPIO_PORTF_BASE, LED_RED, LED_RED);
+	while(i) {};
 }
 
 // NMI? OHGODWHY - green

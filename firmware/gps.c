@@ -6,6 +6,7 @@
  */
 
 #include <string.h>
+#include <stdlib.h>
 #include <stdint.h>
 #include <stdbool.h>
 
@@ -31,6 +32,8 @@
 #include "inc/hw_types.h"
 
 
+#define GPS_BAUD_RATE 9600
+
 
 const char *m1 = "\xB5\x62\x06\x09\x0D\x00\xFF\xFB\x00\x00\x00\x00\x00\x00\xFF\xFF\x00\x00\x17\x2B\x7E"; // UBX CFG revert all but antenna config
 const char *m2 = "\xB5\x62\x06\x01\x03\x00\xF0\x00\x00\xFA\x0F"; // disable nema fix data msg
@@ -43,34 +46,26 @@ volatile int buf_index = 0;
 volatile int gps_msg_ready = 0;
 volatile char gps_buffer[100];
 
-void GPSUARTInt(void)
+void gps_uart_int_handler(void)
 {
-    uint32_t ui32Status, c;
+    uint32_t status, c;
 
-    ui32Status = UARTIntStatus(UART2_BASE, true);
-    UARTIntClear(UART2_BASE, ui32Status);
+    status = UARTIntStatus(UART2_BASE, true);
+    UARTIntClear(UART2_BASE, status);
 
     while(UARTCharsAvail(UART2_BASE)) {
     	c = UARTCharGetNonBlocking(UART2_BASE);
 
-    	if(gps_msg_ready) {
-    		continue;
+    	if(buf_index < sizeof(gps_buffer) - 1) {
+    		gps_buffer[buf_index++] = c;
     	}
+    }
 
-    	if(c == '$') { // start of message indicator
-    		buf_index = 0;
-    	}
-
-    	if(c == '*') { // end of msg indicator
-    		gps_msg_ready = 1;
-    		c = 0; // null out the newline char
-    	}
-
-    	gps_buffer[buf_index++] = c;
+    if(status & UART_INT_RT) {
+    	gps_msg_ready = 1;
+    	UARTDisable(UART2_BASE);
     }
 }
-
-#define BAUD 9600
 
 static void uart_send(const char *msg, int len)
 {
@@ -86,7 +81,7 @@ void gps_init(void)
     SysCtlPeripheralEnable(SYSCTL_PERIPH_GPIOD);
     SysCtlPeripheralEnable(SYSCTL_PERIPH_UART2);
 
-    // PD7 is special and needs to be unlocked before we can use it
+    // PD7 is special and needs to be unlocked before we can reconfigure it
     HWREG(GPIO_PORTD_BASE + GPIO_O_LOCK) = GPIO_LOCK_KEY;
     HWREG(GPIO_PORTD_BASE + GPIO_O_CR) = 0x80;
 
@@ -95,22 +90,37 @@ void gps_init(void)
 
     GPIOPinTypeUART(GPIO_PORTD_BASE, GPIO_PIN_6 | GPIO_PIN_7);
 
-    // Configure the UART for 9600, 8-N-1 operation.
+    /*
+    uDMAChannelAttributeDisable(UDMA_CHANNEL_ADC0, UDMA_ATTR_ALL);
+    uDMAChannelAttributeEnable(UDMA_CHANNEL_ADC0, UDMA_ATTR_USEBURST | UDMA_ATTR_HIGH_PRIORITY);
+    uDMAChannelAssign(UDMA_CH14_ADC0_0);
 
-    UARTConfigSetExpClk(UART2_BASE, SysCtlClockGet(), BAUD,
+
+    //uDMAChannelAttributeEnable(UDMA_CHANNEL_ADC0, UDMA_ATTR_USEBURST);
+    uDMAChannelControlSet(UDMA_CHANNEL_UART2,
+    	UDMA_PRI_SELECT |
+    	UDMA_SIZE_8 |
+    	UDMA_DST_INC_8 |
+    	UDMA_SRC_INC_NONE |
+    	UDMA_ARB_1
+    );
+*/
+
+    // Configure the UART for 9600, 8-N-1 operation.
+    UARTConfigSetExpClk(UART2_BASE, SysCtlClockGet(), GPS_BAUD_RATE,
     		(UART_CONFIG_WLEN_8 | UART_CONFIG_STOP_ONE |
     		UART_CONFIG_PAR_NONE));
 
-	// setup interrupts
+    UARTFIFOEnable(UART2_BASE);
 
     buf_index = 0;
     gps_msg_ready = 0;
 
-    UARTEnable(UART2_BASE);
-
     /* send all the gps config messages */
 
     /*
+	UARTEnable(UART2_BASE);
+
     int i = 0;
     uart_send(m1, sizeof(m1) - 1);
     uart_send(m2, sizeof(m2) - 1);
@@ -118,21 +128,30 @@ void gps_init(void)
     uart_send(m4, sizeof(m4) - 1);
     uart_send(m5, sizeof(m5) - 1);
     uart_send(m6, sizeof(m6) - 1);
-*/
-    UARTDisable(UART2_BASE);
 
-    UARTIntRegister(UART2_BASE, GPSUARTInt);
-    UARTIntEnable(UART2_BASE, UART_INT_RX);
+	UARTDisable(UART2_BASE);
+*/
+
+	// setup interrupts
+    UARTIntRegister(UART2_BASE, gps_uart_int_handler);
+    UARTIntEnable(UART2_BASE, UART_INT_RX | UART_INT_RT);
 
     UARTEnable(UART2_BASE);
 }
 
-int parse(char *msg)
+enum gps_state {
+	GPS_OK,
+	GPS_NO_FIX,
+	GPS_ERR,
+	GPS_WRONG_MSG
+};
+
+enum gps_state parse(char *msg, float *lat, float *lng, uint32_t *time, uint32_t *date)
 {
     const char *prefix = "$GPRMC";
 
     char *end, *start = msg;
-    char *date, *time, *lat, *lng;
+    char *date_s = NULL, *time_s = NULL, *lat_s = NULL, *lng_s = NULL;
     int field = 0;
 
     do {
@@ -142,53 +161,118 @@ int parse(char *msg)
             *end = 0;
         }
 
-        //printf("%d - '%s'\n", field, start);
-
         switch(field) {
             case 0:
                 if(strncmp(start, prefix, sizeof(prefix) - 1)) { // not the message we're looking for
-                    return -1;
+                    return GPS_WRONG_MSG;
                 }
                 break;
 
-            case 1: time = start; break;
+            case 1: time_s = start; break;
             case 2:
                 if(*start == 'V') { // no fix or bad fix, exit
                 	debug_printf("no fix\r\n");
-                    return -1;
+                    return GPS_NO_FIX;
                 }
                 break;
 
-            case 3: lat  = start; break;
-            case 5: lng  = start; break;
-            case 9: date = start; break;
+            case 3: lat_s  = start; break;
+            case 5: lng_s  = start; break;
+            case 9: date_s = start; break;
         };
 
         start = end + 1;
         field++;
     } while(end);
 
-    debug_printf("%s - %s (%s, %s)\r\n", date, time, lat, lng);
+    *lat = atof(lat_s);
+    *lng = atof(lng_s);
+    *time = atoi(time_s);
+    *date = atoi(date_s);
 
-    return 0;
+  //  debug_printf("lat: (%s,%s) -> (%f,%f)\r\n", lat_s, lng_s, *lat, *lng);
+    //debug_printf("time: %s-%s -> %d-%d\r\n", date_s, time_s, *date, *time);
+
+    //debug_printf("lat: '%s' - %f\r\n %s (%s, %s)\r\n", date, time, lat, lng);
+
+    return GPS_OK;
 }
 
-void gps_update(void)
+int verify_checksum(char *str)
 {
-	if(gps_msg_ready) {
-		/*
-		char *start = strchr((const char*) gps_buffer, '$');
+	int my_sum = 0;
+	char *end;
 
-		if(start)
-			parse(start);
-		else
-			debug_printf("argh '%s'\r\n", gps_buffer);
-		 */
+	str++; // skip the $
 
-		gps_buffer[buf_index] = 0;
-		buf_index = 0;
-		debug_printf("'%s'\r\n", gps_buffer);
+	/* the NEMA checksum is the xor of everything between $ and * not inclusive */
 
-		gps_msg_ready = 0;
+	while(*str != '*') {
+		if(*str == 0)
+			return 1;
+
+		my_sum ^= *str++;
 	}
+
+	str++;
+
+	int s = strtol(str, &end, 16);
+	// two chars after the * are the checksum in hex, convert them to an int and
+	// compare sums. Also check that only two chars were converted to the sum.
+	if(strtol(str, &end, 16) != my_sum || end != str+2)
+		return 1;
+
+	return 0;
+}
+
+void gps_update(float *lat, float *lng, uint32_t *time, uint32_t *date)
+{
+	char *start = (char *) gps_buffer;
+
+	if(!gps_msg_ready) {
+		return;
+	}
+
+
+	gps_buffer[buf_index] = '\0';
+
+	//debug_printf("buffer: %s\r\n", gps_buffer);
+
+	/* sanity checking */
+	start = strchr(start, '$');
+
+	if(start && !verify_checksum(start)) {
+		uint32_t new_time, new_date;
+		float new_lat, new_lng;
+
+		switch(parse(start,  &new_lat, &new_lng, &new_time, &new_date)) {
+		case GPS_WRONG_MSG:
+        	debug_printf("bad prefix\r\n");
+        	break;
+		case GPS_ERR: // this really shouldn't ever happen
+			debug_printf("gps err\r\n");
+			//gps_reconfigure();
+			break;
+
+		case GPS_NO_FIX:
+			debug_printf("no gps fix\r\n");
+			break;
+
+		case GPS_OK: // update fix variables
+			//debug_printf("gps fix ok: %u-%u (%f, %f)\r\n", new_date, new_time, new_lat, new_lng);
+
+			*lat  = new_lat;
+			*lng  = new_lng;
+			*time = new_time;
+			*date = new_date;
+			break;
+		}
+
+	}else {
+		debug_printf("chk failed\r\n");
+	}
+
+	buf_index = 0;
+	gps_msg_ready = 0;
+	UARTEnable(UART2_BASE);
 }
