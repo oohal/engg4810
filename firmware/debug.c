@@ -76,9 +76,12 @@ void debug_printf(const char *fmt, ...)
 
 	// add a notification if the buffer doesn't have enough room for the whole message
 	if(buffered == sizeof(print_buffer)) {
+		*(print_buffer + sizeof(print_buffer) - 1) = 0;
+	/*
 		const char clip_msg[] = "CLIPPED\r\n";
 		char *end = print_buffer + sizeof(print_buffer) - sizeof(clip_msg);
 		strcpy(end, clip_msg);
+		*/
 	}
 
 	// if we aren't already transmitting, get things started

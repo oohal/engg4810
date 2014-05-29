@@ -45,6 +45,7 @@ void adc_start(void);
 // gps handling functions
 
 extern volatile int gps_msg_ready;
+extern volatile int gps_data_ready;
 
 void gps_init(void);
 void gps_update(float *lat, float *lng, uint32_t *time, uint32_t *date);

@@ -27,7 +27,6 @@ tDMAControlTable dma_channel_list[64];
 #pragma DATA_ALIGN(dma_channel_list, 1024)
 
 /* 1Hz system tick interrupt */
-// FIXME: this isn't actually 1Hz right now
 
 volatile int ticked = 1;
 
@@ -76,6 +75,8 @@ int accel_analyze(uint16_t *samples, uint16_t **largest)
 	return max_mag;
 }
 
+int firstrun = 1;
+
 #pragma FUNC_NEVER_RETURNS(main);
 int main(void)
 {
@@ -94,7 +95,7 @@ int main(void)
 	SysTickEnable();
 
 	FPUEnable();
-	FPUStackingDisable();
+	FPUStackingDisable(); // no float in interrupts, not now, not ever
 
 	// configure LED GPIOs for mad rad blinkenlites
 	SysCtlPeripheralEnable(SYSCTL_PERIPH_GPIOF);
@@ -107,12 +108,10 @@ int main(void)
 	uDMAControlBaseSet(dma_channel_list);
 	uDMAEnable();
 
-	// initalise UART0 which runs the debug interface. This gets NOPed out for release builds
-	debug_init();
-
+	debug_init(); // initalise UART0 which runs the debug interface. This gets NOPed out for release builds
 
 	adc_init();
-	gps_init(); //
+	gps_init();
 
 	GPIOPinWrite(GPIO_PORTF_BASE, pins, 0x00); // turn off LEDs
 
@@ -201,11 +200,12 @@ int main(void)
 
 			if(max > peak_accel) {
 				peak_accel = max;
+
 				accel_sample[0] = buf[0];
 				accel_sample[1] = buf[1];
 				accel_sample[2] = buf[2];
+				temp_sample     = buf[3];
 				//memcpy(accel_sample, buf, sizeof(accel_sample));
-				temp_sample = buf[4];
 			}
 
 			adc_start();
@@ -225,9 +225,9 @@ int main(void)
 			debug_printf("temp: %d ", (int) temp_sample);
 			debug_printf("loc: (%f,%f)\r\n", lat, lng);
 
-			ticked = 0;
-			adc_timer = 0;
-			gps_timer = 0;
+			 ticked = gps_timer = adc_timer = 0;
 		}
+
+		firstrun = 0;
 	}
 }

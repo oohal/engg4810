@@ -237,6 +237,9 @@ static void sd_hw_init(void)
 	SysCtlPeripheralEnable(SYSCTL_PERIPH_GPIOA);
 	SysCtlPeripheralEnable(SYSCTL_PERIPH_SSI0);
 
+	// configure the SPI TX and RX DMA channels
+
+
 	// initialise SSI0, 400kHz clock, 8 bit transfers
 	sd_speed(0);
 

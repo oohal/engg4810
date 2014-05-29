@@ -12,7 +12,6 @@
 #include <inc/hw_types.h>
 #include <inc/hw_ints.h>
 #include <inc/hw_gpio.h>
-
 #include <driverlib/sysctl.h>
 #include <driverlib/gpio.h>
 #include <driverlib/adc.h>
@@ -24,16 +23,14 @@
 
 #include "firmware.h"
 
-volatile int udma_done = 0;
 uint16_t sample_buffer[4 * SAMPLE_RATE]; // 4 values per sample instant
-
+volatile int udma_done = 0;
 
 int dma_err = 0;
+
 void dma_int_handler(void)
 {
-	uDMAIntClear(UDMA_CHANNEL_ADC0);
-	udma_done = 1;
-	dma_err = 1;
+	FaultISR();
 }
 
 void adc_int_handler(void)
@@ -43,10 +40,12 @@ void adc_int_handler(void)
 	ADCIntClear(ADC0_BASE, 0);
 
 	if(dmaint & (1 << UDMA_CHANNEL_ADC0)) {
-		ADCIntClear(ADC0_BASE, 0);
 		uDMAIntClear(UDMA_CHANNEL_ADC0);
+
 		TimerDisable(TIMER0_BASE, TIMER_A);
 		udma_done = 1;
+	} else {
+		FaultISR();
 	}
 }
 
@@ -57,9 +56,9 @@ void timer_int_handler(void)
 
 
 /*
- * peripherial scatter gather structure, we need this to support high-ish sampling rates since the DMA
- * controller can only transfer 1024 items per transfer. So, we need to chain them up otherwise processor
- * intervention is required.
+ * Peripherial scatter gather DMA structure, we need this to support high-ish sampling rates since the DMA
+ * controller can only transfer 1024 items per transfer. To support more items the DMA controller is used in
+ * scatter gather mode and blocks of 1024 items are chained together.
  */
 
 #define DMA_TASKS (SAMPLE_RATE * 4 / 1024)
@@ -75,27 +74,31 @@ tDMAControlTable adc_dma_task_list[] = {
 		1024, UDMA_SIZE_16,
 		UDMA_SRC_INC_NONE, (void *) (ADC0_BASE + ADC_O_SSFIFO0),
 		UDMA_DST_INC_16, sample_buffer +  1024,
-		UDMA_ARB_4, UDMA_MODE_BASIC
+		UDMA_ARB_4, UDMA_MODE_BASIC // final transfer in a scatter gather task must be AUTO or BASIC
 	)
 };
 
+#define TIMER_INT_ALL (TIMER_TIMB_DMA | TIMER_TIMB_MATCH | TIMER_CAPB_EVENT | \
+		TIMER_CAPB_MATCH | TIMER_TIMB_TIMEOUT | TIMER_TIMA_DMA | TIMER_TIMA_MATCH | \
+		TIMER_RTC_MATCH | TIMER_CAPA_EVENT | TIMER_CAPA_MATCH | TIMER_TIMA_TIMEOUT)
+
 void adc_init()
 {
+
 	/*
 	 * setup TIMER0A to provide a periodic ADC tigger, this timer isn't started until adc_start() is called
 	 */
 
 	SysCtlPeripheralEnable(SYSCTL_PERIPH_TIMER0);
 
-	TimerIntDisable(TIMER0_BASE, 0xFFFFFFFF); // disable all interrupts
+	TimerDisable(TIMER0_BASE, TIMER_A);
 	TimerConfigure(TIMER0_BASE, TIMER_CFG_PERIODIC);
 
 	TimerLoadSet(TIMER0_BASE, TIMER_A, SysCtlClockGet() / SAMPLE_RATE);
+	TimerControlTrigger(TIMER0_BASE, TIMER_A, true); // enable ADC triggering
 
-	//TimerADCEventSet(TIMER0_BASE, TIMER_ADC_TIMEOUT_A); 	// enable ADC triggering from this timer
-	TimerControlTrigger(TIMER0_BASE, TIMER_A, true);
-
-	TimerIntRegister(TIMER0_BASE, TIMER_A, timer_int_handler);
+	TimerIntDisable(TIMER0_BASE, TIMER_INT_ALL); // disable all interrupts
+	//TimerIntRegister(TIMER0_BASE, TIMER_A, timer_int_handler);
 	//TimerIntEnable(TIMER0_BASE, TIMER_A);
 
 	/*
@@ -109,8 +112,7 @@ void adc_init()
 
 	SysCtlPeripheralEnable(SYSCTL_PERIPH_GPIOE);
 	SysCtlPeripheralEnable(SYSCTL_PERIPH_GPIOD);
-
-	//SysCtlPeripheralEnable(SYSCTL_PERIPH_ADC0);
+	//SysCtlPeripheralEnable(SYSCTL_PERIPH_ADC0); // done elsewhere
 
 	GPIOPinTypeADC(GPIO_PORTD_BASE, GPIO_PIN_2 | GPIO_PIN_3);
 	GPIOPinTypeADC(GPIO_PORTE_BASE, GPIO_PIN_1 | GPIO_PIN_2);
@@ -118,29 +120,14 @@ void adc_init()
 	uDMAChannelAttributeDisable(UDMA_CHANNEL_ADC0, UDMA_ATTR_ALL);
 	uDMAChannelAttributeEnable(UDMA_CHANNEL_ADC0, UDMA_ATTR_USEBURST | UDMA_ATTR_HIGH_PRIORITY);
 	uDMAChannelAssign(UDMA_CH14_ADC0_0);
+	uDMAChannelDisable(UDMA_CHANNEL_ADC0);
+	uDMAIntClear(UDMA_CHANNEL_ADC0);
 
-	/*
-	//uDMAChannelAttributeEnable(UDMA_CHANNEL_ADC0, UDMA_ATTR_USEBURST);
-	uDMAChannelControlSet(UDMA_CHANNEL_ADC0,
-		UDMA_PRI_SELECT |
-		UDMA_SIZE_16 |
-		UDMA_DST_INC_16 |
-		UDMA_SRC_INC_NONE |
-		UDMA_ARB_4
-	);
-*/
+	/* ADC configuration */
 
-	uDMAChannelScatterGatherSet(UDMA_CHANNEL_ADC0,
-		sizeof(adc_dma_task_list) / sizeof(adc_dma_task_list[0]),
-		adc_dma_task_list,
-		true // we want the ADC DMA requests to drive the thing
-	);
-
-	ADCIntRegister(ADC0_BASE, 0, adc_int_handler);
 	ADCIntDisableEx(ADC0_BASE, ADC_INT_SS0 | ADC_INT_SS1 | ADC_INT_SS2 | ADC_INT_SS3);
 	ADCIntClearEx(ADC0_BASE, ADC_INT_SS0 | ADC_INT_SS1 | ADC_INT_SS2 | ADC_INT_SS3);
-
-	ADCIntEnable(ADC0_BASE, 0);
+	ADCIntRegister(ADC0_BASE, 0, adc_int_handler);
 
 	ADCSequenceDisable(ADC0_BASE, 0);
 	ADCSequenceConfigure(ADC0_BASE, 0, ADC_TRIGGER_TIMER, 0);
@@ -153,6 +140,7 @@ void adc_init()
 	ADCSequenceUnderflowClear(ADC0_BASE, 0);
 	ADCSequenceOverflowClear(ADC0_BASE, 0);
 	ADCIntClear(ADC0_BASE, 0);
+	ADCIntEnable(ADC0_BASE, 0);
 
 	ADCSequenceDMAEnable(ADC0_BASE, 0);
 	ADCSequenceEnable(ADC0_BASE, 0);
@@ -181,19 +169,11 @@ void adc_init()
 void adc_start(void)
 {
 	udma_done = 0;
-/*
-	// prepare new transfer
-	uDMAChannelTransferSet(UDMA_CHANNEL_ADC0 | UDMA_PRI_SELECT,
-		UDMA_MODE_BASIC,
-		(void *) (ADC0_BASE + ADC_O_SSFIFO0),
-		sample_buffer,
-		SAMPLE_RATE * 4
-	);
-*/
+
 	uDMAChannelScatterGatherSet(UDMA_CHANNEL_ADC0,
 		sizeof(adc_dma_task_list) / sizeof(adc_dma_task_list[0]),
 		adc_dma_task_list,
-		true // we want the ADC DMA requests to drive the thing
+		true // peripherial scatter gather since we want the ADC DMA requests to drive the thing
 	);
 
 	/* flush out ADC FIFO */
@@ -203,6 +183,6 @@ void adc_start(void)
 	ADCSequenceOverflowClear(ADC0_BASE, 0);
 
 	uDMAChannelEnable(UDMA_CHANNEL_ADC0);
-
 	TimerEnable(TIMER0_BASE, TIMER_A);
 }
+
