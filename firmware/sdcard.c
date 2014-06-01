@@ -1,3 +1,4 @@
+#if 0
 #include <stdint.h>
 #include <stdbool.h>
 #include <string.h>
@@ -308,3 +309,4 @@ int sd_init(void)
 }
 
 
+#endif

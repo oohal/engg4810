@@ -2,6 +2,7 @@
 #include <string.h>
 #include <stdbool.h>
 
+#include <stdio.h>
 #include <inc/hw_memmap.h>
 #include <inc/hw_types.h>
 #include <inc/hw_ints.h>
@@ -15,26 +16,24 @@
 #include <driverlib/udma.h>
 #include <driverlib/pin_map.h>
 
+#include "firmware.h"
+
 //{GPIGPIO_PORTF_BASE, GPIO_PIN_1, GPIO_OUTPUT}, /* EK_TM4C123GXL_LED_RED */
 //{GPIO_PORTF_BASE, GPIO_PIN_2, GPIO_OUTPUT},    /* EK_TM4C123GXL_LED_BLUE */
 //{GPIO_PORTF_BASE, GPIO_PIN_3, GPIO_OUTPUT},    /* EK_TM4C123GXL_LED_GREEN */
 
 /*************** Default interrupt handlers ********************/
 
-enum leds {
-	LED_RED = GPIO_PIN_1,
-	LED_GREEN = GPIO_PIN_3,
-	LED_BLUE = GPIO_PIN_2
-};
 
 static flash_leds(uint8_t colour, int flash)
 {
-	int i = 0;
+	int i = 1;
 	uint8_t c;
 
 	if(!flash) {
 		GPIOPinWrite(GPIO_PORTF_BASE, colour, colour);
-		while(1) {};
+		while(i) {};
+		return;
 	}
 
 	while(1) {
@@ -57,6 +56,11 @@ void FaultISR(void) {
 	while(i) {};
 }
 
+void led_set(enum leds led, int state)
+{
+	GPIOPinWrite(GPIO_PORTF_BASE, led, state ? 0xFF : 0x00);
+}
+
 // NMI? OHGODWHY - green
 void NmiISR(void) {
 	flash_leds(LED_GREEN, 0);
@@ -69,3 +73,23 @@ void IntDefaultHandler(void) {
 void die_horribly(void) {
 	flash_leds(LED_BLUE, 0);
 }
+
+#if 0
+void debug_printf(const char *fmt, ...)
+{
+	va_list args;
+	int length;
+
+	va_start(args, fmt);
+		//length = vsnprintf(print_buffer + buffered, sizeof(print_buffer) - buffered, fmt, args);
+		vprintf(fmt, args);
+	va_end(args);
+
+	return;
+}
+#else
+void debug_printf(const char *fmt, ...)
+{
+	return;
+}
+#endif

@@ -10,6 +10,7 @@
 
 #include <stdint.h>
 #include <driverlib/udma.h>
+#include <driverlib/gpio.h>
 
 extern tDMAControlTable dma_channel_list[64];
 
@@ -34,9 +35,9 @@ void debug_printf(const char *fmt, ...);
 // NOTE: if you change the sampling rate the DMA task list stuff in analog.c also
 //       needs to be changed to match the new buffer size
 
-#define SAMPLE_RATE 512
+#define SAMPLE_RATE 1024
 
-extern volatile int udma_done;
+extern volatile int adc_done;
 extern uint16_t sample_buffer[4 * SAMPLE_RATE];
 
 void adc_init(void);
@@ -48,6 +49,17 @@ extern volatile int gps_msg_ready;
 extern volatile int gps_data_ready;
 
 void gps_init(void);
-void gps_update(float *lat, float *lng, uint32_t *time, uint32_t *date);
+int gps_update(float *lat, float *lng, uint32_t *time, uint32_t *date, uint32_t *gps_fix);
+
+
+enum leds {
+	LED_RED = GPIO_PIN_1,
+	LED_GREEN = GPIO_PIN_3,
+	LED_BLUE = GPIO_PIN_2
+};
+
+void led_set(enum leds led, int state);
+
+void FaultISR(void);
 
 #endif /* FIRMWARE_H_ */

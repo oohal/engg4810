@@ -33,17 +33,12 @@
 
 #define GPS_BAUD_RATE 9600
 
-const char *m1 = "\xB5\x62\x06\x09\x0D\x00\xFF\xFB\x00\x00\x00\x00\x00\x00\xFF\xFF\x00\x00\x17\x2B\x7E"; // UBX CFG revert all but antenna config
-const char *m2 = "\xB5\x62\x06\x01\x03\x00\xF0\x00\x00\xFA\x0F"; // disable nema fix data msg
-const char *m3 = "\xB5\x62\x06\x01\x03\x00\xF0\x01\x00\xFB\x11"; // disable lat/long msg
-const char *m4 = "\xB5\x62\x06\x01\x03\x00\xF0\x02\x00\xFC\x13"; // disable dop & active satellites
-const char *m5 = "\xB5\x62\x06\x01\x03\x00\xF0\x03\x00\xFD\x15"; // disable satellites in view
-const char *m6 = "\xB5\x62\x06\x01\x03\x00\xF0\x05\x00\xFF\x19"; // disable course over ground speed msg
+const char sleep10m[]   = "\xB5\x62\x02\x41\x08\x00\xC0\x27\x09\x00\x02\x00\x00\x00\x3D\x82";
+const char cyclic_msg[] = "\xB5\x62\x06\x11\x02\x00\x08\x01\x22\x92";
 
-volatile int buf_index = 0;
 volatile int gps_msg_ready = 0;
 volatile int gps_data_ready = 0;
-volatile char gps_buffer[199];
+volatile char gps_buffer[399];
 
 /* always leave room in the gps_buffer for the nul terminator */
 #define TRANSFER_SIZE (sizeof(gps_buffer) - 1)
@@ -52,66 +47,79 @@ char *intreason = "";
 
 void gps_uart_int_handler(void)
 {
-    uint32_t status = UARTIntStatus(UART2_BASE, true);
+    uint32_t status = UARTIntStatus(UART1_BASE, true);
 
-    UARTIntClear(UART2_BASE, status);
+    UARTIntClear(UART1_BASE, status);
 
     /* DMA completion interrupt */
-    if(uDMAIntStatus() & 1) { // UART2 is on DMA channel 0, apparently
-    	uDMAIntClear(1);
+    if(uDMAIntStatus() & (1 << UDMA_CHANNEL_UART1RX)) { // UART1 is on DMA channel 0, apparently
+    	uDMAIntClear((1 << UDMA_CHANNEL_UART1RX));
     	intreason = "DMA complete";
     	gps_msg_ready = 1;
     }
 
+    if(uDMAIntStatus() & (1 << UDMA_CHANNEL_UART1TX)) { // TX DMA complete interrupt, ignore
+    	uDMAIntClear((1 << UDMA_CHANNEL_UART1TX));
+    }
+
     /* RX timeout interrupt */
     if(status & UART_INT_RT) {
-    	uDMAChannelDisable(UDMA_SEC_CHANNEL_UART2RX_0);
+    	uDMAChannelDisable(UDMA_CHANNEL_UART1RX);
     	gps_msg_ready = 1;
     	intreason = "timeout";
     }
 }
 
-static void uart_send(const char *msg, int len)
+static void gps_send(const char *msg, int length)
 {
-	do {
-		UARTCharPut(UART2_BASE, *msg);
-		msg++; len--;
-	} while(len);
+	/* configure transmitter DMA */
+	static char buffer[50];
+
+	memcpy(buffer, msg, length);
+
+    uDMAChannelTransferSet(UDMA_CHANNEL_UART1TX,
+   		UDMA_MODE_BASIC,
+    	(char *) buffer,
+    	(void *) (UART1_BASE + UART_O_DR),
+    	length
+    );
+
+    uDMAChannelEnable(UDMA_CHANNEL_UART1TX);
 }
 
 static void setup_dma_transfer(void)
 {
-	uDMAChannelAttributeEnable(UDMA_SEC_CHANNEL_UART2RX_0, UDMA_ATTR_USEBURST | UDMA_ATTR_HIGH_PRIORITY);
+	uDMAChannelAttributeEnable(UDMA_CHANNEL_UART1RX, UDMA_ATTR_USEBURST | UDMA_ATTR_HIGH_PRIORITY);
 
-    uDMAChannelTransferSet(UDMA_SEC_CHANNEL_UART2RX_0,
+    uDMAChannelTransferSet(UDMA_CHANNEL_UART1RX,
    		UDMA_MODE_BASIC,
-    	(void *) (UART2_BASE + UART_O_DR),
+    	(void *) (UART1_BASE + UART_O_DR),
     	(char *) gps_buffer,
     	TRANSFER_SIZE
     );
 
-    uDMAChannelEnable(UDMA_SEC_CHANNEL_UART2RX_0);
+    uDMAChannelEnable(UDMA_CHANNEL_UART1RX);
 }
 
 void gps_init(void)
 {
-	// Using UART2, PD6 PD7
-    SysCtlPeripheralEnable(SYSCTL_PERIPH_GPIOD);
-    SysCtlPeripheralEnable(SYSCTL_PERIPH_UART2);
+	// Using UART1, PB0 PB1
+    SysCtlPeripheralEnable(SYSCTL_PERIPH_GPIOB);
+    SysCtlPeripheralEnable(SYSCTL_PERIPH_UART1);
 
-    // PD7 is special and needs to be unlocked before we can reconfigure it
-    HWREG(GPIO_PORTD_BASE + GPIO_O_LOCK) = GPIO_LOCK_KEY;
-    HWREG(GPIO_PORTD_BASE + GPIO_O_CR) = 0x80;
+    SysCtlPeripheralSleepEnable(SYSCTL_PERIPH_GPIOB);
+    SysCtlPeripheralSleepEnable(SYSCTL_PERIPH_UART1);
 
-    GPIOPinConfigure(GPIO_PD6_U2RX);
-    GPIOPinConfigure(GPIO_PD7_U2TX);
+    GPIOPinConfigure(GPIO_PB0_U1RX);
+    GPIOPinConfigure(GPIO_PB1_U1TX);
 
-    GPIOPinTypeUART(GPIO_PORTD_BASE, GPIO_PIN_6 | GPIO_PIN_7);
+    GPIOPinTypeUART(GPIO_PORTB_BASE, GPIO_PIN_0 | GPIO_PIN_1);
+    //GPIOPinTypeUART(GPIO_PORTB_BASE, GPIO_PIN_0);
 
     // Configure the UART for 9600, 8-N-1 operation.
-    UARTConfigSetExpClk(UART2_BASE, SysCtlClockGet(), GPS_BAUD_RATE,
-    		(UART_CONFIG_WLEN_8 | UART_CONFIG_STOP_ONE |
-    		UART_CONFIG_PAR_NONE));
+    UARTConfigSetExpClk(UART1_BASE, SysCtlClockGet(), GPS_BAUD_RATE,
+    	(UART_CONFIG_WLEN_8 | UART_CONFIG_STOP_ONE |
+    	UART_CONFIG_PAR_NONE));
 
     /*
      * In order for RX timeout interrupts to be generated there must be  32 bit periods must
@@ -126,14 +134,14 @@ void gps_init(void)
      * DMA completion interrupt which ensures there is at most a two second delay between GPS updates.
      */
 
-    UARTFIFOEnable(UART2_BASE);
-    UARTFIFOLevelSet(UART2_BASE, UART_FIFO_TX4_8, UART_FIFO_RX6_8);
+    UARTFIFOEnable(UART1_BASE);
+    UARTFIFOLevelSet(UART1_BASE, UART_FIFO_TX4_8, UART_FIFO_RX6_8);
 
-    uDMAChannelAssign(UDMA_CH0_UART2RX);
-    uDMAChannelAttributeDisable(UDMA_SEC_CHANNEL_UART2RX_0, UDMA_ATTR_ALL);
-	uDMAChannelAttributeEnable(UDMA_SEC_CHANNEL_UART2RX_0, UDMA_ATTR_USEBURST | UDMA_ATTR_HIGH_PRIORITY);
+//    uDMAChannelAssign(UDMA_CH23_UART1RX);
+    uDMAChannelAttributeDisable(UDMA_CHANNEL_UART1RX, UDMA_ATTR_ALL);
+	uDMAChannelAttributeEnable(UDMA_CHANNEL_UART1RX, UDMA_ATTR_USEBURST | UDMA_ATTR_HIGH_PRIORITY);
 
-    uDMAChannelControlSet(UDMA_SEC_CHANNEL_UART2RX_0,
+    uDMAChannelControlSet(UDMA_CHANNEL_UART1RX,
     	UDMA_PRI_SELECT |
     	UDMA_SIZE_8 |
     	UDMA_DST_INC_8 |
@@ -141,26 +149,32 @@ void gps_init(void)
     	UDMA_ARB_4
     );
 
-    UARTIntRegister(UART2_BASE, gps_uart_int_handler);
-    UARTIntEnable(UART2_BASE, UART_INT_RT);// | UART_INT_RX);
+    uDMAChannelAttributeDisable(UDMA_CHANNEL_UART1TX, UDMA_ATTR_ALL);
+    uDMAChannelControlSet(UDMA_CHANNEL_UART1TX,
+        UDMA_PRI_SELECT |
+       	UDMA_SIZE_8 |
+       	UDMA_DST_INC_NONE |
+       	UDMA_SRC_INC_8 |
+       	UDMA_ARB_1
+      );
+
+    UARTIntRegister(UART1_BASE, gps_uart_int_handler);
+    UARTIntEnable(UART1_BASE, UART_INT_RT);
 
     memset((void*) gps_buffer, 0, sizeof(gps_buffer));
 
-    UARTDMAEnable(UART2_BASE, UART_DMA_RX); // | UART_DMA_ERR_RXSTOP); // );
+    UARTDMAEnable(UART1_BASE, UART_DMA_RX | UART_DMA_TX);
 
 	// setup interrupts
-
-    buf_index = 0;
     gps_msg_ready = 0;
 
     setup_dma_transfer();
-    UARTEnable(UART2_BASE);
+    UARTEnable(UART1_BASE);
 }
 
 enum gps_state {
 	GPS_OK,
 	GPS_NO_FIX,
-	GPS_ERR,
 	GPS_WRONG_MSG
 };
 
@@ -169,6 +183,7 @@ enum gps_state parse(char *msg, float *lat, float *lng, uint32_t *time, uint32_t
     const char *prefix = "$GPRMC";
 
     char *date_s = NULL, *time_s = NULL, *lat_s = NULL, *lng_s = NULL;
+    float ns_indicator = 0.0, ew_indicator = 0.0;
     char *end, *start = msg;
     int field = 0;
     bool no_fix = false;
@@ -189,13 +204,23 @@ enum gps_state parse(char *msg, float *lat, float *lng, uint32_t *time, uint32_t
 
             case 1: time_s = start; break;
             case 2:
-                if(*start == 'V') { // no fix or bad fix, exit
+                if(*start == 'V') { // no fix or bad fix
                 	no_fix = true;
                 }
                 break;
 
             case 3: lat_s  = start; break;
+
+            case 4:  // north south indicator
+            	ns_indicator = (*start == 'S' ? -1.0 : 1.0);
+            	break;
+
             case 5: lng_s  = start; break;
+
+            case 6:
+            	ew_indicator = (*start == 'W' ? -1 : 1);
+            	break;
+
             case 9: date_s = start; break;
         };
 
@@ -203,15 +228,10 @@ enum gps_state parse(char *msg, float *lat, float *lng, uint32_t *time, uint32_t
         field++;
     } while(end);
 
-    *lat = atof(lat_s);
-    *lng = atof(lng_s);
+    *lat = atof(lat_s) * (float) ns_indicator;
+    *lng = atof(lng_s) * (float) ew_indicator;
     *time = atoi(time_s);
     *date = atoi(date_s);
-
-  //  debug_printf("lat: (%s,%s) -> (%f,%f)\r\n", lat_s, lng_s, *lat, *lng);
-    //debug_printf("time: %s-%s -> %d-%d\r\n", date_s, time_s, *date, *time);
-
-    //debug_printf("lat: '%s' - %f\r\n %s (%s, %s)\r\n", date, time, lat, lng);
 
     if(no_fix) {
     	return GPS_NO_FIX;
@@ -241,6 +261,7 @@ int verify_checksum(char *str)
 	return 0;
 }
 
+
 /* returns the number of items left to transfer
  *
  * NB: channel must be the channel index not bit mask
@@ -253,16 +274,22 @@ int dma_remaining(uint32_t channel)
 	return (table[channel].ui32Control & 0x3FF0) >> 4;
 }
 
-void gps_update(float *lat, float *lng, uint32_t *time, uint32_t *date)
+int gps_update(float *lat, float *lng, uint32_t *time, uint32_t *date, uint32_t *gps_fix)
 {
 	/* the difference between TRANSFER_SIZE and the remaining chars is the number recieved */
-    int offset = (TRANSFER_SIZE - dma_remaining(UDMA_SEC_CHANNEL_UART2RX_0)) - 1;
-	char *start;
+    int offset = (TRANSFER_SIZE - dma_remaining(UDMA_CHANNEL_UART1RX)) - 1;
+	char *start = (char *)gps_buffer;
+
+	int sleeping = 0;
+
+	static int no_fix_timer = 0;
+	static int fix_timer = 0;
+	static int in_cyclic = 0;
 
     /* Empty the FIFO */
 
-    while(UARTCharsAvail(UART2_BASE)) {
-    	uint32_t c = UARTCharGet(UART2_BASE);
+    while(UARTCharsAvail(UART1_BASE)) {
+    	uint32_t c = UARTCharGet(UART1_BASE);
 
     	if(offset < sizeof(gps_buffer) - 2) {
     		gps_buffer[offset++] = c;
@@ -274,42 +301,97 @@ void gps_update(float *lat, float *lng, uint32_t *time, uint32_t *date)
 	//debug_printf("%s buffer: %s\r\n", intreason, gps_buffer);
 
 	/* look for a NEMA message start char */
+    while(1) {
+		start = strchr((char *) start, '$');
 
-	start = strchr((char *) gps_buffer, '$');
-
-	if(start && !verify_checksum(start)) { /* valid NEMA message */
-		uint32_t new_time, new_date;
-		float new_lat, new_lng;
-
-		//debug_printf("chk passed\r\n", start);
-
-		switch(parse(start,  &new_lat, &new_lng, &new_time, &new_date)) {
-		case GPS_WRONG_MSG:
-        	debug_printf("non RMC msg\r\n");
-        	break;
-
-		case GPS_ERR: // this really shouldn't ever happen
-			//debug_printf("gps err\r\n");
-			//gps_reconfigure();
-			break;
-
-		case GPS_NO_FIX:
-			//debug_printf("no gps fix\r\n");
-			*time = new_time;
-			*date = new_date;
-			break;
-
-		case GPS_OK: // update fix variables
-			*lat  = new_lat;
-			*lng  = new_lng;
-			*time = new_time;
-			*date = new_date;
+		if(!start) { // no more NEMA messages
 			break;
 		}
-	} else {
-		debug_printf("chk failed\r\n");
-	}
+
+		if(!verify_checksum(start)) { /* valid NEMA message */
+			char *end = strchr(start, '*');
+
+			uint32_t new_time, new_date;
+			float new_lat, new_lng;
+
+			if(!end) {
+				break;
+			}
+
+			*end = 0;
+
+			//debug_printf("chk passed\r\n", start);
+
+			switch(parse(start,  &new_lat, &new_lng, &new_time, &new_date)) {
+			case GPS_WRONG_MSG:
+				/* odds are this is a GPTXT message that's generated on reset by the GPS
+				 * might be able to do something useful with this information
+				 */
+
+				debug_printf("non RMC msg\r\n");
+				break;
+
+			case GPS_NO_FIX:
+				*time = new_time; // even if we have no fix we might have valid times
+				*date = new_date;
+				*gps_fix = 0;
+				fix_timer = 0;
+				in_cyclic = 0; // the GPS has a nice "feature" where it'll reset if it loses fix
+				               // while in power cyclic tracking mode.
+
+				no_fix_timer++;
+			/* i have no idea how well or if this works at all, either way not enabling it for submission
+
+				if(no_fix_timer >= 300) { // no fix for 5 minutes, turn off the GPS for 10 minutes before trying to get another fix
+					no_fix_timer = 0;
+					gps_send(sleep10m, sizeof(sleep10m) - 1);
+					sleeping = 1;
+				}
+			*/
+
+				break;
+
+			case GPS_OK: // update fix variables
+				*lat  = new_lat;
+				*lng  = new_lng;
+				*time = new_time;
+				*date = new_date;
+
+				if(!fix_timer) {
+					debug_printf("fix reaquired after %d\r\n", no_fix_timer);
+				}
+
+				*gps_fix = 1;
+				no_fix_timer = 0;
+
+				fix_timer++;
+
+				// once we've had a fix for a minute start using cyclic track mode to save power
+				// the GPS module tends to reset if it loses track in cyclic mode, so it'll reboot
+				// and operate in max performance mode.
+
+				if(fix_timer > 60 && !in_cyclic) {
+					gps_send(cyclic_msg, sizeof(cyclic_msg) - 1);
+					in_cyclic = 1;
+
+					debug_printf("switching to cyclic\r\n");
+				}
+
+				break;
+			}
+
+			start = end + 1;
+		} else {
+			start = start + 1; // skip over this $ and try find another message
+
+			debug_printf("chk failed\r\n");
+		}
+    }
+
+    memset((void *) gps_buffer, 0, sizeof(gps_buffer));
 
 	gps_msg_ready = 0;
 	setup_dma_transfer();
+
+	return sleeping;
 }

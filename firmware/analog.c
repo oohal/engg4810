@@ -24,7 +24,7 @@
 #include "firmware.h"
 
 uint16_t sample_buffer[4 * SAMPLE_RATE]; // 4 values per sample instant
-volatile int udma_done = 0;
+volatile int adc_done = 0;
 
 int dma_err = 0;
 
@@ -43,7 +43,7 @@ void adc_int_handler(void)
 		uDMAIntClear(UDMA_CHANNEL_ADC0);
 
 		TimerDisable(TIMER0_BASE, TIMER_A);
-		udma_done = 1;
+		adc_done = 1;
 	} else {
 		FaultISR();
 	}
@@ -71,25 +71,33 @@ tDMAControlTable adc_dma_task_list[] = {
 		UDMA_ARB_4, UDMA_MODE_PER_SCATTER_GATHER
 	),
 	uDMATaskStructEntry(
+			1024, UDMA_SIZE_16,
+			UDMA_SRC_INC_NONE, (void *) (ADC0_BASE + ADC_O_SSFIFO0),
+			UDMA_DST_INC_16, sample_buffer + 1024,
+			UDMA_ARB_4, UDMA_MODE_PER_SCATTER_GATHER
+	),
+	uDMATaskStructEntry(
+			1024, UDMA_SIZE_16,
+			UDMA_SRC_INC_NONE, (void *) (ADC0_BASE + ADC_O_SSFIFO0),
+			UDMA_DST_INC_16, sample_buffer + 2048,
+			UDMA_ARB_4, UDMA_MODE_PER_SCATTER_GATHER
+	),
+	uDMATaskStructEntry(
 		1024, UDMA_SIZE_16,
 		UDMA_SRC_INC_NONE, (void *) (ADC0_BASE + ADC_O_SSFIFO0),
-		UDMA_DST_INC_16, sample_buffer +  1024,
+		UDMA_DST_INC_16, sample_buffer +  3072,
 		UDMA_ARB_4, UDMA_MODE_BASIC // final transfer in a scatter gather task must be AUTO or BASIC
 	)
 };
 
-#define TIMER_INT_ALL (TIMER_TIMB_DMA | TIMER_TIMB_MATCH | TIMER_CAPB_EVENT | \
-		TIMER_CAPB_MATCH | TIMER_TIMB_TIMEOUT | TIMER_TIMA_DMA | TIMER_TIMA_MATCH | \
-		TIMER_RTC_MATCH | TIMER_CAPA_EVENT | TIMER_CAPA_MATCH | TIMER_TIMA_TIMEOUT)
-
 void adc_init()
 {
-
 	/*
 	 * setup TIMER0A to provide a periodic ADC tigger, this timer isn't started until adc_start() is called
 	 */
 
 	SysCtlPeripheralEnable(SYSCTL_PERIPH_TIMER0);
+	SysCtlPeripheralSleepEnable(SYSCTL_PERIPH_TIMER0);
 
 	TimerDisable(TIMER0_BASE, TIMER_A);
 	TimerConfigure(TIMER0_BASE, TIMER_CFG_PERIODIC);
@@ -97,21 +105,16 @@ void adc_init()
 	TimerLoadSet(TIMER0_BASE, TIMER_A, SysCtlClockGet() / SAMPLE_RATE);
 	TimerControlTrigger(TIMER0_BASE, TIMER_A, true); // enable ADC triggering
 
-	TimerIntDisable(TIMER0_BASE, TIMER_INT_ALL); // disable all interrupts
-	//TimerIntRegister(TIMER0_BASE, TIMER_A, timer_int_handler);
-	//TimerIntEnable(TIMER0_BASE, TIMER_A);
-
 	/*
 	 * configure the ADC and DMA operation
 	 */
 
-	// AIN1 - Accelerometer x/y/z axis
-	// AIN2 - Accelerometer x/y/z axis
-	// AIN4 - Accelerometer x/y/z axis
-	// AIN5 - Fun's external temp sensor
-
 	SysCtlPeripheralEnable(SYSCTL_PERIPH_GPIOE);
 	SysCtlPeripheralEnable(SYSCTL_PERIPH_GPIOD);
+
+	SysCtlPeripheralSleepEnable(SYSCTL_PERIPH_GPIOE);
+	SysCtlPeripheralSleepEnable(SYSCTL_PERIPH_GPIOD);
+
 	//SysCtlPeripheralEnable(SYSCTL_PERIPH_ADC0); // done elsewhere
 
 	GPIOPinTypeADC(GPIO_PORTD_BASE, GPIO_PIN_2 | GPIO_PIN_3);
@@ -122,8 +125,11 @@ void adc_init()
 	uDMAChannelAssign(UDMA_CH14_ADC0_0);
 	uDMAChannelDisable(UDMA_CHANNEL_ADC0);
 	uDMAIntClear(UDMA_CHANNEL_ADC0);
+	uDMAIntRegister(UDMA_INT_ERR, dma_int_handler);
 
 	/* ADC configuration */
+
+	ADCHardwareOversampleConfigure(ADC0_BASE, 4);
 
 	ADCIntDisableEx(ADC0_BASE, ADC_INT_SS0 | ADC_INT_SS1 | ADC_INT_SS2 | ADC_INT_SS3);
 	ADCIntClearEx(ADC0_BASE, ADC_INT_SS0 | ADC_INT_SS1 | ADC_INT_SS2 | ADC_INT_SS3);
@@ -131,11 +137,18 @@ void adc_init()
 
 	ADCSequenceDisable(ADC0_BASE, 0);
 	ADCSequenceConfigure(ADC0_BASE, 0, ADC_TRIGGER_TIMER, 0);
+	//ADCSequenceConfigure(ADC0_BASE, 0, ADC_TRIGGER_PROCESSOR, 0);
 
-	ADCSequenceStepConfigure(ADC0_BASE, 0, 0, ADC_CTL_CH1);
-	ADCSequenceStepConfigure(ADC0_BASE, 0, 1, ADC_CTL_CH2);
-	ADCSequenceStepConfigure(ADC0_BASE, 0, 2, ADC_CTL_CH4);
-	ADCSequenceStepConfigure(ADC0_BASE, 0, 3, ADC_CTL_TS | ADC_CTL_END | ADC_CTL_IE);
+	// AIN1 - Accelerometer x/y/z axis
+	// AIN2 - Accelerometer x/y/z axis
+	// AIN4 - Accelerometer x/y/z axis
+
+	// AIN1 - Fun's external temp sensor
+
+	ADCSequenceStepConfigure(ADC0_BASE, 0, 0, ADC_CTL_CH5);
+	ADCSequenceStepConfigure(ADC0_BASE, 0, 1, ADC_CTL_CH4);
+	ADCSequenceStepConfigure(ADC0_BASE, 0, 2, ADC_CTL_CH2);
+	ADCSequenceStepConfigure(ADC0_BASE, 0, 3, ADC_CTL_CH1 | ADC_CTL_END | ADC_CTL_IE);
 
 	ADCSequenceUnderflowClear(ADC0_BASE, 0);
 	ADCSequenceOverflowClear(ADC0_BASE, 0);
@@ -168,7 +181,7 @@ void adc_init()
 
 void adc_start(void)
 {
-	udma_done = 0;
+	adc_done = 0;
 
 	uDMAChannelScatterGatherSet(UDMA_CHANNEL_ADC0,
 		sizeof(adc_dma_task_list) / sizeof(adc_dma_task_list[0]),
