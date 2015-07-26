@@ -1,0 +1,17 @@
+# depslib dependency file v1.0
+1401621802 source:c:\users\oliver\desktop\parser\parser\main.c
+	<stdio.h>
+	<stdlib.h>
+	<stdint.h>
+	<string.h>
+	<math.h>
+	<stdarg.h>
+
+1401631413 source:c:\users\oliver\dropbox\engg4810\parser\main.c
+	<stdio.h>
+	<stdlib.h>
+	<stdint.h>
+	<string.h>
+	<math.h>
+	<stdarg.h>
+

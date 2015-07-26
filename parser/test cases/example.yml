@@ -1,0 +1,214 @@
+metadata:
+    team_number: 3
+
+samples:
+    - temperature: 1850
+      acceleration: [-18.315990, -18.288727, -17.755148]
+      time: 2014-06-01T12:21:43+00:00
+      latitude: -27.497701
+      longitude: 153.011898
+
+    - temperature: 1839
+      acceleration: [-18.101780, -18.386095, -17.463043]
+      time: 2014-06-01T12:22:43+00:00
+      latitude: -27.498600
+      longitude: 153.010905
+
+    - temperature: 1862
+      acceleration: [-18.148518, -18.055042, -17.443569]
+      time: 2014-06-01T12:23:44+00:00
+      latitude: -27.497408
+      longitude: 153.006836
+
+    - temperature: 1887
+      acceleration: [-18.218622, -18.284832, -17.770727]
+      time: 2014-06-01T12:24:44+00:00
+      latitude: -27.493958
+      longitude: 153.005404
+
+    - temperature: 1910
+      acceleration: [-18.428938, -18.269255, -17.626621]
+      time: 2014-06-01T12:25:45+00:00
+      latitude: -27.494584
+      longitude: 153.001237
+
+    - temperature: 1925
+      acceleration: [-18.292622, -18.417253, -17.692833]
+      time: 2014-06-01T12:26:45+00:00
+      latitude: -27.492424
+      longitude: 152.994759
+
+    - temperature: 1952
+      acceleration: [-18.323780, -18.288727, -17.836937]
+      time: 2014-06-01T12:27:46+00:00
+      latitude: -27.491825
+      longitude: 152.994222
+
+    - temperature: 1957
+      acceleration: [-18.347149, -18.226412, -17.727884]
+      time: 2014-06-01T12:28:46+00:00
+      latitude: -27.486731
+      longitude: 152.993018
+
+    - temperature: 1974
+      acceleration: [-18.292622, -18.347149, -17.821358]
+      time: 2014-06-01T12:29:46+00:00
+      latitude: -27.486235
+      longitude: 152.993018
+
+    - temperature: 1976
+      acceleration: [-18.499043, -18.277042, -17.657780]
+      time: 2014-06-01T12:30:47+00:00
+      latitude: -27.486324
+      longitude: 152.993115
+
+    - temperature: 1988
+      acceleration: [-18.292622, -18.343254, -17.466938]
+      time: 2014-06-01T12:31:47+00:00
+      latitude: -27.480404
+      longitude: 152.997933
+
+    - temperature: 1999
+      acceleration: [-18.269255, -18.335464, -17.283884]
+      time: 2014-06-01T12:32:48+00:00
+      latitude: -27.474760
+      longitude: 153.003564
+
+    - temperature: 2002
+      acceleration: [-18.234201, -18.351044, -17.525358]
+      time: 2014-06-01T12:33:48+00:00
+      latitude: -27.468852
+      longitude: 153.010612
+
+    - temperature: 2006
+      acceleration: [-18.253675, -18.343254, -17.470833]
+      time: 2014-06-01T12:34:49+00:00
+      latitude: -27.467301
+      longitude: 153.015039
+
+    - temperature: 2010
+      acceleration: [-18.280937, -18.421148, -17.727884]
+      time: 2014-06-01T12:35:49+00:00
+      latitude: -27.466443
+      longitude: 153.014893
+
+    - temperature: 2012
+      acceleration: [-18.238096, -18.203043, -17.907043]
+      time: 2014-06-01T12:36:50+00:00
+      latitude: -27.466252
+      longitude: 153.018034
+
+    - temperature: 2006
+      acceleration: [-18.323780, -18.261465, -17.825253]
+      time: 2014-06-01T12:37:50+00:00
+      latitude: -27.466899
+      longitude: 153.018864
+
+    - temperature: 1980
+      acceleration: [-18.343254, -18.265360, -17.747358]
+
+    - temperature: 1987
+      acceleration: [-18.331570, -18.304306, -17.887569]
+      time: 2014-06-01T12:39:51+00:00
+      latitude: -27.466007
+      longitude: 153.019434
+
+    - temperature: 1990
+      acceleration: [-18.327675, -18.343254, -17.887569]
+      time: 2014-06-01T12:40:51+00:00
+      latitude: -27.466711
+      longitude: 153.019661
+
+    - temperature: 2001
+      acceleration: [-18.339359, -18.370518, -17.833042]
+
+    - temperature: 1992
+      acceleration: [-18.304306, -18.347149, -17.883675]
+      time: 2014-06-01T12:42:52+00:00
+      latitude: -27.466256
+      longitude: 153.019303
+
+    - temperature: 2001
+      acceleration: [-18.335464, -18.339359, -17.856411]
+      time: 2014-06-01T12:43:53+00:00
+      latitude: -27.465763
+      longitude: 153.019482
+
+    - temperature: 2005
+      acceleration: [-18.331570, -18.362728, -17.864201]
+      time: 2014-06-01T12:44:53+00:00
+      latitude: -27.466772
+      longitude: 153.018408
+
+    - temperature: 2004
+      acceleration: [-18.284832, -18.245886, -17.766832]
+      time: 2014-06-01T12:45:53+00:00
+      latitude: -27.466305
+      longitude: 153.019450
+
+    - temperature: 2002
+      acceleration: [-18.222517, -18.206938, -17.922623]
+      time: 2014-06-01T12:46:54+00:00
+      latitude: -27.466040
+      longitude: 153.019401
+
+    - temperature: 1999
+      acceleration: [-18.343254, -18.351044, -17.852516]
+      time: 2014-06-01T12:47:54+00:00
+      latitude: -27.466227
+      longitude: 153.019694
+
+    - temperature: 2009
+      acceleration: [-18.347149, -18.366623, -17.887569]
+
+    - temperature: 2024
+      acceleration: [-18.351044, -18.366623, -17.848621]
+
+    - temperature: 2021
+      acceleration: [-18.206938, -18.245886, -17.945990]
+      time: 2014-06-01T12:50:56+00:00
+      latitude: -27.466016
+      longitude: 153.019401
+
+    - temperature: 2027
+      acceleration: [-18.288727, -18.319885, -17.860306]
+      time: 2014-06-01T12:51:56+00:00
+      latitude: -27.465841
+      longitude: 153.014665
+
+    - temperature: 2045
+      acceleration: [-18.413359, -18.257570, -17.809675]
+      time: 2014-06-01T12:52:57+00:00
+      latitude: -27.466239
+      longitude: 153.013346
+
+    - temperature: 2049
+      acceleration: [-18.440622, -18.304306, -17.739569]
+      time: 2014-06-01T12:53:57+00:00
+      latitude: -27.463196
+      longitude: 153.010677
+
+    - temperature: 2055
+      acceleration: [-18.413359, -18.296516, -17.782412]
+      time: 2014-06-01T12:54:57+00:00
+      latitude: -27.461397
+      longitude: 153.005046
+
+    - temperature: 2061
+      acceleration: [-18.401674, -18.226412, -17.809675]
+      time: 2014-06-01T12:55:58+00:00
+      latitude: -27.459184
+      longitude: 152.998812
+
+    - temperature: 2065
+      acceleration: [-18.347149, -18.230307, -17.844727]
+      time: 2014-06-01T12:56:58+00:00
+      latitude: -27.459749
+      longitude: 152.991797
+
+    - temperature: 2067
+      acceleration: [-18.417253, -18.187464, -17.657780]
+      time: 2014-06-01T12:57:59+00:00
+      latitude: -27.458069
+      longitude: 152.986719
+
